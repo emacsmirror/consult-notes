@@ -2,8 +2,8 @@
 
 ;; Author: Colin McLear <mclear@fastmail.com>
 ;; Maintainer: Colin McLear
-;; Version: 0.7
-;; Package-Requires: ((emacs "27.1") (consult "0.17") (s "1.12.0") (dash "2.19"))
+;; Version: 0.8
+;; Package-Requires: ((emacs "28.1") (consult "1.0") (s "1.12.0") (dash "2.19"))
 ;; Keywords: convenience
 ;; Homepage: https://github.com/mclear-tools/consult-notes
 
@@ -186,7 +186,8 @@ and DIR is the directory to find notes."
       :narrow   ,char
       :category ,consult-notes-category
       :face     consult-file
-      :annotate ,(apply-partially consult-notes-file-dir-annotate-function name dir)
+      ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
+      :annotate ,(lambda (cand) (funcall consult-notes-file-dir-annotate-function name dir cand))
       :hidden   ,hidden
       :items    ,(lambda ()
                   (let* ((files (directory-files dir nil consult-notes-file-match)))

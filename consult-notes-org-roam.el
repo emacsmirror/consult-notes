@@ -2,7 +2,7 @@
 
 ;; Author: Colin McLear <mclear@fastmail.com>
 ;; Maintainer: Colin McLear
-;; Version: 0.7
+;; Version: 0.8
 ;; Keywords: convenience
 ;; Homepage: https://github.com/mclear-tools/consult-notes
 
@@ -231,7 +231,8 @@ org-roam-node-display-template."
     :narrow ,consult-notes-org-roam-node-narrow-key
     :require-match t
     :category 'org-roam-node
-    :annotate ,consult-notes-org-roam-annotate-function
+    ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
+    :annotate ,(lambda (cand) (funcall consult-notes-org-roam-annotate-function cand))
     :items ,(lambda ()
               ;; Strategy: Use org-roam's native formatting (respects user's
               ;; org-roam-node-display-template and custom node accessors),
@@ -298,7 +299,8 @@ org-roam-node-display-template."
     :narrow ,consult-notes-org-roam-ref-narrow-key
     :require-match t
     :category 'org-roam-ref
-    :annotate ,consult-notes-org-roam-annotate-function
+    ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
+    :annotate ,(lambda (cand) (funcall consult-notes-org-roam-annotate-function cand))
     :items ,(lambda ()
               ;; Strategy: Use org-roam's native formatting (respects user's
               ;; org-roam-node-display-template and custom node accessors),

@@ -2,7 +2,7 @@
 
 ;; Author: Colin McLear <mclear@fastmail.com>
 ;; Maintainer: Colin McLear
-;; Version: 0.7
+;; Version: 0.8
 ;; Keywords: convenience
 ;; Homepage: https://github.com/mclear-tools/consult-notes
 
@@ -104,7 +104,8 @@ This function is only called when `consult-notes-denote-dir' is not nil."
   (list :name     (propertize "Denote notes" 'face 'consult-notes-sep)
         :narrow   ?d
         :category consult-notes-category
-        :annotate consult-notes-denote-annotate-function
+        ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
+        :annotate (lambda (cand) (funcall consult-notes-denote-annotate-function cand))
         :items    (lambda ()
                     (let* ((max-width 0)
 			   (max-title-width (- (window-width (minibuffer-window)) consult-notes-denote-display-keywords-width))
