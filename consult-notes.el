@@ -308,8 +308,9 @@ Which search function is used depends on the value of `consult-notes-use-rg'."
   (let ((sources (delete-dups
                   (flatten-list
                    (append
-                    ;; dir sources
-                    (mapcar #'cddr consult-notes-file-dir-sources)
+                    ;; dir sources; take only the directory element so
+                    ;; keyword options like :hidden don't leak into the list
+                    (mapcar #'caddr consult-notes-file-dir-sources)
                     ;; org roam
                     (when (bound-and-true-p consult-notes-org-roam-mode)
                       (list (expand-file-name org-roam-directory)))
