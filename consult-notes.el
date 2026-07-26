@@ -5,7 +5,7 @@
 ;; Version: 0.8
 ;; Package-Requires: ((emacs "28.1") (consult "1.0") (s "1.12.0") (dash "2.19"))
 ;; Keywords: convenience
-;; Homepage: https://github.com/mclear-tools/consult-notes
+;; Homepage: https://codeberg.org/mclear-tools/consult-notes
 
 ;; Copyright (C) 2022 Colin McLear
 
