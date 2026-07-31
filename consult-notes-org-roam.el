@@ -165,29 +165,32 @@ org-roam-node-display-template."
 
 ;;;; Functions
 ;; Display functions
-(cl-defmethod org-roam-node-sizes ((node org-roam-node))
-  "Display NODE size."
-  (file-size-human-readable (file-attribute-size (file-attributes (org-roam-node-file node)))))
+;; The org-roam-node specializer is only known once org-roam is loaded;
+;; defining these methods earlier signals "Unknown specializer".
+(with-eval-after-load 'org-roam
+  (cl-defmethod org-roam-node-sizes ((node org-roam-node))
+    "Display NODE size."
+    (file-size-human-readable (file-attribute-size (file-attributes (org-roam-node-file node)))))
 
-(cl-defmethod org-roam-node-dir ((node org-roam-node))
-  "Display NODE parent directory."
-  (file-name-nondirectory (directory-file-name (file-name-directory (org-roam-node-file node)))))
+  (cl-defmethod org-roam-node-dir ((node org-roam-node))
+    "Display NODE parent directory."
+    (file-name-nondirectory (directory-file-name (file-name-directory (org-roam-node-file node)))))
 
-(cl-defmethod org-roam-node-fmtime ((node org-roam-node))
-  "Display NODE modified time."
-  (consult-notes--time (org-roam-node-file-mtime node)))
+  (cl-defmethod org-roam-node-fmtime ((node org-roam-node))
+    "Display NODE modified time."
+    (consult-notes--time (org-roam-node-file-mtime node)))
 
-(cl-defmethod org-roam-node-blinks ((node org-roam-node))
-  "Display NODE backlinks count."
-  (let* ((count (caar (org-roam-db-query
-                       [:select (funcall count source)
-                        :from links
-                        :where (= dest $s1)
-                        :and (= type "id")]
-                       (org-roam-node-id node)))))
-    (if (> count 0)
-        (propertize (format "%3s" count) 'face 'default)
-      (propertize "   " 'face 'shadow))))
+  (cl-defmethod org-roam-node-blinks ((node org-roam-node))
+    "Display NODE backlinks count."
+    (let* ((count (caar (org-roam-db-query
+                         [:select (funcall count source)
+                          :from links
+                          :where (= dest $s1)
+                          :and (= type "id")]
+                         (org-roam-node-id node)))))
+      (if (> count 0)
+          (propertize (format "%3s" count) 'face 'default)
+        (propertize "   " 'face 'shadow)))))
 
 
 (defun consult-notes-org-roam-annotate (cand)
