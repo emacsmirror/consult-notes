@@ -39,27 +39,34 @@
 
 ;;;; Variables
 
+;; Placate the byte-compiler
+(defvar denote-directory)
+(defvar denote-prompts)
+
 (defcustom consult-notes-denote-display-id t
   "Whether ID is displayed in annotations for `consult-notes-denote'."
   :group 'consult-notes
   :type 'boolean)
 
 (defcustom consult-notes-denote-dir t
-  "Whether directory name of file is displayed in the annotations for `consult-notes-denote'."
+  "Whether to show the file directory in `consult-notes-denote' annotations."
   :group 'consult-notes
   :type 'boolean)
 
 (defcustom consult-notes-denote-files-function
   (lambda () (denote-directory-files nil t nil))
-  "Function for listing Denote files. All files, only Denote files (Org, Markdown or TXT) or a regular expression."
+  "Function for listing Denote files.
+
+All files, only Denote files (Org, Markdown or TXT), or a regular
+expression."
   :group 'consult-notes
   :type '(choice
-          (const :tag "All files" 
+          (const :tag "All files"
                  (lambda () (denote-directory-files nil t nil)))
           (const :tag "Denote files"
                  (lambda () (denote-directory-files nil t t)))
           (function :tag "Custom regex function"
-                    :value (lambda () 
+                    :value (lambda ()
                              (let ((regex (read-string "Enter regex: ")))
                                (denote-directory-files regex t nil))))))
 
@@ -73,29 +80,35 @@ details."
   :type 'function)
 
 (defcustom consult-notes-denote-display-keywords-function #'consult-notes-denote--display-keywords
-  "Function to display the keywords of the file in the annotations for `consult-notes-denote'."
+  "Function to display file keywords in `consult-notes-denote' annotations."
   :group 'consult-notes
   :type 'function)
 
 (defcustom consult-notes-denote-display-keywords-indicator "#"
-  "Prefix to indicate Denote keywords of the file in the annotations for `consult-notes-denote-display-keywords-function'."
+  "Prefix indicating Denote keywords in annotations.
+
+Used by `consult-notes-denote-display-keywords-function'."
   :group 'consult-notes
   :type 'string)
 
 (defcustom consult-notes-denote-display-keywords-width 20
-  "Minimum width reserved for keywords in the annotations for `consult-notes-denote-display-keywords-function'."
+  "Minimum width reserved for keywords in annotations.
+
+Used by `consult-notes-denote-display-keywords-function'."
   :group 'consult-notes
   :type 'integer)
 
 (defcustom consult-notes-denote-display-dir-function #'consult-notes-denote--display-dir
-  "Function used to display the directory name of the file in the annotations for `consult-notes-denote'.
+  "Function to display the file directory in annotations.
 
-This function is only called when `consult-notes-denote-dir' is not nil."
+This function is only called when `consult-notes-denote-dir' is
+non-nil."
   :group 'consult-notes
   :type 'function)
 
 (defcustom consult-notes-denote-title-margin 24
-  "Margin between the title and the keywords in the annotations for `consult-notes-denote'.
+  "Margin between title and keywords in `consult-notes-denote'.
+
 Only used when `consult-notes-denote-title-width' is nil."
   :group 'consult-notes
   :type 'integer)
@@ -133,36 +146,56 @@ from the widest title plus `consult-notes-denote-title-margin'."
                                                    (title (if fixed-width
                                                               (truncate-string-to-width title fixed-width nil ?\s t)
                                                             title))
-                                                   (dir (file-relative-name (file-name-directory f) denote-directory))
                                                    (keywords (denote-extract-keywords-from-path f)))
                                               (unless fixed-width
-                                                (let ((current-width (string-width title)))
-                                                  (when (> current-width max-width)
-                                                    (setq max-width (min (+ consult-notes-denote-title-margin current-width)
-                                                                         max-title-width)))))
+                                                (setq max-width (max max-width (string-width title))))
                                               (propertize title 'denote-path f 'denote-keywords keywords)))
                                           (funcall consult-notes-denote-files-function)))
-                           (align-width (if fixed-width (+ 2 fixed-width) (+ 2 max-width))))
+                           (align-width (if fixed-width
+                                            (+ 2 fixed-width)
+                                          (min (+ max-width consult-notes-denote-title-margin)
+                                               max-title-width)))
+                           (composed
+                            (mapcar (lambda (c)
+                                      (let* ((keywords (get-text-property 0 'denote-keywords c))
+                                             (path (get-text-property 0 'denote-path c))
+                                             (dirs (directory-file-name (file-relative-name (file-name-directory path) denote-directory))))
+                                        (concat c
+                                                ;; align keywords
+                                                (propertize " " 'display `(space :align-to (+ left ,align-width)))
+                                                (propertize (funcall consult-notes-denote-display-keywords-function keywords) 'face 'consult-notes-name)
+                                                (when consult-notes-denote-dir
+                                                  (propertize (funcall consult-notes-denote-display-dir-function dirs) 'face 'consult-notes-name)))))
+                                    cands))
+                           (counts (make-hash-table :test 'equal)))
+                      ;; Notes whose title, keywords, and directory all
+                      ;; coincide produce `equal' candidate strings, which
+                      ;; completion UIs collapse and consult resolves to the
+                      ;; first match. Disambiguate duplicates with the ID.
+                      (dolist (c composed)
+                        (puthash c (1+ (gethash c counts 0)) counts))
                       (mapcar (lambda (c)
-                                (let* ((keywords (get-text-property 0 'denote-keywords c))
-                                       (path (get-text-property 0 'denote-path c))
-                                       (dirs (directory-file-name (file-relative-name (file-name-directory path) denote-directory))))
-                                  (concat c
-                                          ;; align keywords
-                                          (propertize " " 'display `(space :align-to (+ left ,align-width)))
-                                          (propertize (funcall consult-notes-denote-display-keywords-function keywords) 'face 'consult-notes-name)
-                                          (when consult-notes-denote-dir
-                                            (propertize (funcall consult-notes-denote-display-dir-function dirs) 'face 'consult-notes-name)))))
-                              cands)))
+                                (if (> (gethash c counts) 1)
+                                    (concat c
+                                            (propertize
+                                             (format " <%s>"
+                                                     (denote-retrieve-filename-identifier
+                                                      (get-text-property 0 'denote-path c)))
+                                             'face 'shadow))
+                                  c))
+                              composed)))
         ;; Custom preview
         :state  #'consult-notes-denote--state
         ;; Create new note on match fail
         :new     #'consult-notes-denote--new-note))
 
 (defun consult-notes-denote--display-keywords (keywords)
-  (format "%18s" (if keywords (concat
-			       consult-notes-denote-display-keywords-indicator
-			       (mapconcat 'identity keywords " ")) "")))
+  "Format KEYWORDS for display in annotations."
+  (format (format "%%%ds" consult-notes-denote-display-keywords-width)
+          (if keywords
+              (concat consult-notes-denote-display-keywords-indicator
+                      (mapconcat 'identity keywords " "))
+            "")))
 
 (defun consult-notes-denote--display-dir (dirs)
   (format "%18s" (concat "/" dirs)))
@@ -189,9 +222,6 @@ from the widest title plus `consult-notes-denote-title-margin'."
                                  (not (consult-notes-denote--excluded-p cand))
                                  (consult-notes-denote--file cand))))))
 
-(defun consult-notes-denote--blinks (cand)
-  (format "%s" (get-text-property 0 'denote-blinks)))
-
 (defun consult-notes-denote--extension-file-type (f)
   "Return denote file-type of F."
   (pcase (file-name-extension f)
@@ -204,10 +234,9 @@ from the widest title plus `consult-notes-denote-title-margin'."
 
 Input \"foo\", then create \"id-foo\", file type is determined by
 `denote-file-type', choose manually when `denote-prompts' includes
-'file-type, or simply include the extension; \"foo.txt\", creates
-\"id-foo.txt\."
+\\='file-type, or simply include the extension; \"foo.txt\" creates
+\"id-foo.txt\"."
   (let* ((f (expand-file-name cand denote-directory))
-         (f-dir (file-name-directory f))
          (f-name-base (file-name-base f))
          (file-type (consult-notes-denote--extension-file-type f))
          keywords date subdirectory template)

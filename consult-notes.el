@@ -3,7 +3,7 @@
 ;; Author: Colin McLear <mclear@fastmail.com>
 ;; Maintainer: Colin McLear
 ;; Version: 0.8
-;; Package-Requires: ((emacs "28.1") (consult "1.0") (s "1.12.0") (dash "2.19"))
+;; Package-Requires: ((emacs "28.1") (consult "1.0"))
 ;; Keywords: convenience
 ;; Homepage: https://codeberg.org/mclear-tools/consult-notes
 
@@ -82,11 +82,6 @@ details."
   :group 'consult-notes
   :type 'boolean)
 
-(defcustom consult-notes-default-format '(org-mode)
-  "Default format for `consult-notes' open function."
-  :group 'consult-notes
-  :type 'sexp)
-
 (defcustom consult-notes-max-relative-age (* 60 60 24 14)
   "Maximum relative age in seconds displayed by the file annotator.
 
@@ -94,18 +89,18 @@ Set to `most-positive-fixnum' to always use a relative age, or 0 to never show
 a relative age."
   :type 'integer)
 
-(defcustom consult-notes-file-match "[^.].*[.].+[^~]$"'
-  "Default format for `consult-notes' open function."
-  :group 'consult-notes
-  :type 'string)
+(defcustom consult-notes-file-match "\\`[^.].*\\.[^~]+\\'"
+  "Regexp matching note files in `consult-notes' file-dir sources.
 
-(defcustom consult-notes-file-action 'consult--file-action
-  "Default action for `consult-notes' open function when no match is found."
+The default matches non-hidden files that have an extension and do
+not end in \"~\"."
   :group 'consult-notes
-  :type 'function)
+  :type 'regexp)
 
 ;; Placate the byte-compiler
 (defvar org-roam-directory)
+(defvar denote-directory)
+(declare-function consult-notes-org-headings-files "consult-notes-org-headings")
 (defvar consult-notes-history nil
   "History variable for `consult-notes'.")
 
@@ -114,27 +109,27 @@ a relative age."
 
 (defface consult-notes-name '((t (:inherit (warning) :weight light)))
   "Face for name data in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 (defface consult-notes-size '((t (:inherit (warning) :weight light)))
   "Face for size data in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 (defface consult-notes-time '((t (:inherit (warning) :weight light)))
   "Face for time data in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 (defface consult-notes-dir '((t (:inherit (warning) :weight light)))
   "Face for directory data in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 (defface consult-notes-backlinks '((t (:inherit (warning) :weight light)))
   "Face for backlinks data in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 (defface consult-notes-sep '((t (:inherit (consult-separator))))
   "Face for separator in `consult-notes'."
-  :group 'faces)
+  :group 'consult-notes)
 
 ;;;; Time/Date Functions
 ;; These are derived from Daniel Mendler's Marginalia package.
@@ -174,13 +169,12 @@ a relative age."
     (consult-notes--time-absolute time)))
 
 ;;;; Consult-Notes File-Directory Function
-;;;###autoload
 (defun consult-notes--file-dir-source (name char dir &rest args)
-  "Generate the notes source for each directory of files in `consult-notes-dir-sources'.
+  "Return a notes source list suitable for `consult--multi'.
 
- Return a notes source list suitable for `consult--multi'.
-NAME is the source name, CHAR is the narrowing character,
-and DIR is the directory to find notes."
+NAME is the source name, CHAR is the narrowing character, and DIR
+is the directory to find notes. ARGS may include keyword options
+such as :hidden."
   (let ((hidden (plist-get args :hidden)))
     `(:name     ,(propertize name 'face 'consult-notes-sep)
       :narrow   ,char
@@ -201,7 +195,6 @@ and DIR is the directory to find notes."
                       (funcall state action (and cand (concat (file-name-as-directory dir) cand)))))))))
 
 ;;;; Consult-Notes File Dir Annotation Function
-;;;###autoload
 (defun consult-notes--file-dir-annotate (name dir cand)
   "Annotate file CAND with its directory DIR, size, and modification time."
   (let* ((file  (concat (file-name-as-directory dir) cand))
@@ -216,13 +209,22 @@ and DIR is the directory to find notes."
     (format "%7s %8s  %12s  %8s" name fsize ftime dirs)))
 
 ;;;; Consult-Notes Make File-Dir Sources
-;;;###autoload
+(defvar consult-notes--file-dir-sources nil
+  "Sources generated from `consult-notes-file-dir-sources'.
+Kept so that stale sources can be removed when the user changes
+`consult-notes-file-dir-sources'.")
+
 (defun consult-notes--make-file-dir-sources ()
-  "Add generated `consult--multi' sources to list of all sources."
-  (let ((sources (mapcar (lambda (s) (apply #'consult-notes--file-dir-source s))
-		                 consult-notes-file-dir-sources)))
-    (dolist (i sources)
-      (add-to-list 'consult-notes-all-sources i))))
+  "Regenerate `consult--multi' sources from `consult-notes-file-dir-sources'."
+  ;; Drop previously generated sources so removed or edited directory
+  ;; entries do not linger in `consult-notes-all-sources'.
+  (dolist (s consult-notes--file-dir-sources)
+    (setq consult-notes-all-sources (delete s consult-notes-all-sources)))
+  (setq consult-notes--file-dir-sources
+        (mapcar (lambda (s) (apply #'consult-notes--file-dir-source s))
+                consult-notes-file-dir-sources))
+  (dolist (s (reverse consult-notes--file-dir-sources))
+    (add-to-list 'consult-notes-all-sources s)))
 
 ;;;; Minor Modes
 
@@ -238,13 +240,11 @@ and DIR is the directory to find notes."
   ;; Add or remove denote notes from sources
   (cond (consult-notes-denote-mode
          ;; Add denote notes source to consult--multi integration
-         (add-to-list 'consult-notes-all-sources 'consult-notes-denote--source 'append)
-         (setq consult-notes-file-action #'consult-notes-denote--new-note))
+         (add-to-list 'consult-notes-all-sources 'consult-notes-denote--source 'append))
         (t
          ;; Remove denote notes from sources
-         (delete 'consult-notes-denote--source consult-notes-all-sources)
-         ;; Revert default new action
-         (custom-reevaluate-setting 'consult-notes-file-action))))
+         (setq consult-notes-all-sources
+               (delete 'consult-notes-denote--source consult-notes-all-sources)))))
 
 ;;;;; Consult-Notes Org-Roam
 ;; Define a minor-mode for consult-notes & org-roam
@@ -275,8 +275,10 @@ Optional argument ARG indicates whether the mode should be enabled or disabled."
          (add-to-list 'consult-notes-all-sources 'consult-notes-org-roam--refs 'append))
         (t
          ;; Remove org-roam sources
-         (delete 'consult-notes-org-roam--nodes consult-notes-all-sources)
-         (delete 'consult-notes-org-roam--refs  consult-notes-all-sources))))
+         (setq consult-notes-all-sources
+               (delete 'consult-notes-org-roam--nodes consult-notes-all-sources))
+         (setq consult-notes-all-sources
+               (delete 'consult-notes-org-roam--refs consult-notes-all-sources)))))
 
 ;;;;; Consult-Notes Org-Headings
 ;; Define a minor-mode for consult-notes & org headings in specified files
@@ -294,9 +296,8 @@ Optional argument ARG indicates whether the mode should be enabled or disabled."
          (add-to-list 'consult-notes-all-sources 'consult-notes-org-headings--source 'append))
         (t
          ;; Remove org-headings from sources
-         (delete 'consult-notes-org-headings--source consult-notes-all-sources)
-         ;; Revert default new action
-         (custom-reevaluate-setting 'consult-notes-file-action))))
+         (setq consult-notes-all-sources
+               (delete 'consult-notes-org-headings--source consult-notes-all-sources)))))
 
 ;;;; Consult-Notes Search (Grep/Ripgrep)
 
@@ -310,16 +311,19 @@ Which search function is used depends on the value of `consult-notes-use-rg'."
                    (append
                     ;; dir sources; take only the directory element so
                     ;; keyword options like :hidden don't leak into the list
-                    (mapcar #'caddr consult-notes-file-dir-sources)
+                    (mapcar (lambda (s) (expand-file-name (caddr s)))
+                            consult-notes-file-dir-sources)
                     ;; org roam
                     (when (bound-and-true-p consult-notes-org-roam-mode)
                       (list (expand-file-name org-roam-directory)))
                     ;; denote
                     (when (bound-and-true-p consult-notes-denote-mode)
                       (list (expand-file-name denote-directory)))
-                    ;; org agenda files
+                    ;; org heading files; the resolver returns absolute
+                    ;; paths and handles all value forms of
+                    ;; `consult-notes-org-headings-files'
                     (when (bound-and-true-p consult-notes-org-headings-mode)
-                      (mapcar #'expand-file-name consult-notes-org-headings-files)))))))
+                      (consult-notes-org-headings-files)))))))
     (if consult-notes-use-rg
         (consult-ripgrep sources)
       (consult-grep sources))))

@@ -33,8 +33,7 @@
 ;;; Code:
 
 (require 'consult-notes)
-(require 's)
-(require 'dash)
+(require 'seq)
 (unless (require 'org-roam nil 'noerror)
   (message "Org-roam not found! Please ensure that it is installed."))
 
@@ -43,6 +42,7 @@
 (defvar org-roam-node-display-template)
 (defvar org-roam-directory)
 (defvar org-roam-dailies-directory)
+(defvar org-roam-node-annotation-function)
 
 (declare-function org-roam-backlink-source-node "org-roam")
 (declare-function org-roam-node-visit "org-roam")
@@ -61,6 +61,8 @@
 (declare-function org-roam-db-query "org-roam")
 (declare-function org-roam-node-file-mtime "org-roam")
 (declare-function org-roam-node-file "org-roam")
+(declare-function org-roam-node-p "org-roam")
+(declare-function org-roam-node-point "org-roam")
 
 ;;;; Variables
 (defcustom consult-notes-org-roam-template
@@ -72,12 +74,14 @@
           "${blinks:3} ")
   "DEPRECATED: This variable is no longer used.
 
-consult-notes-org-roam now respects your org-roam display configuration.
-To customize how nodes appear in consult-notes, set `org-roam-node-display-template'
-and define custom node accessors with `cl-defmethod' as documented in the
-org-roam manual.
+consult-notes-org-roam now respects your org-roam display
+configuration. To customize how nodes appear in consult-notes,
+set `org-roam-node-display-template' and define custom node
+accessors with `cl-defmethod' as documented in the org-roam
+manual.
 
-Note: Annotations are still controlled by `consult-notes-org-roam-annotate-function'."
+Note: Annotations are still controlled by
+`consult-notes-org-roam-annotate-function'."
   :group 'consult-notes
   :type 'string)
 
@@ -88,10 +92,14 @@ This variable is no longer used by consult-notes-org-roam."
  "0.8")
 
 (defcustom consult-notes-org-roam-show-file-size nil
-  "Show file size in annotations for org-roam notes in `consult-notes'.")
+  "Show file size in annotations for org-roam notes in `consult-notes'."
+  :group 'consult-notes
+  :type 'boolean)
 
 (defcustom consult-notes-org-roam-blinks nil
-  "Show number of backlinks for org-roam note in `consult-notes'.")
+  "Show number of backlinks for org-roam note in `consult-notes'."
+  :group 'consult-notes
+  :type 'boolean)
 
 (defcustom consult-notes-org-roam-annotate-function #'consult-notes-org-roam-annotate
   "Function for annotations for org-roam nodes/refs in `consult-notes'.
@@ -191,30 +199,36 @@ org-roam-node-display-template."
               (org-roam-node-file node))
              (dir
               (file-name-nondirectory (directory-file-name (file-name-directory file))))
+             ;; Only compute size and backlink count when they will be
+             ;; displayed; annotations run per candidate on each keystroke.
              (size
-              (file-size-human-readable (file-attribute-size (file-attributes file))))
+              (and consult-notes-org-roam-show-file-size
+                   (file-size-human-readable
+                    (file-attribute-size (file-attributes file)))))
              (time
               (consult-notes--time (org-roam-node-file-mtime node)))
-             (links (caar (org-roam-db-query
-                           [:select (funcall count source)
-                            :from links
-                            :where (= dest $s1)
-                            :and (= type "id")]
-                           (org-roam-node-id node)))))
+             (links
+              (and consult-notes-org-roam-blinks
+                   (caar (org-roam-db-query
+                          [:select (funcall count source)
+                           :from links
+                           :where (= dest $s1)
+                           :and (= type "id")]
+                          (org-roam-node-id node))))))
 
         (put-text-property 0 (length dir)   'face 'consult-notes-dir dir)
-        (when consult-notes-org-roam-show-file-size
+        (when size
           (put-text-property 0 (length size)  'face 'consult-notes-size size))
         (put-text-property 0 (length time)  'face 'consult-notes-time time)
         (concat (propertize " " 'display `(space :align-to center))
-                (when consult-notes-org-roam-blinks
+                (when links
                   (if (> links 0)
                       (propertize (format "%3s" links) 'face 'consult-notes-backlinks)
                     (propertize "   " 'face 'shadow)))
                 " "
-                (s-truncate 8 (format "%s" dir) "…")
+                (truncate-string-to-width dir 8 nil nil "…")
                 " "
-                (when consult-notes-org-roam-show-file-size (format "%5s" size))
+                (when size (format "%5s" size))
                 " "
                 (format "%5s" time)))
     ""))
@@ -224,18 +238,22 @@ org-roam-node-display-template."
   (let ((open (consult--temporary-files))
         (preview (consult--buffer-preview)))
     (lambda (action cand)
-      (let ((node (when (and cand (not (string-empty-p cand)))
-                    (get-text-property 0 'node cand))))
+      (let* ((node (when (and cand (not (string-empty-p cand)))
+                     (get-text-property 0 'node cand)))
+             (buf (and (eq action 'preview)
+                       (org-roam-node-p node)
+                       (funcall open (org-roam-node-file node)))))
         (unless cand
           (funcall open))
-        (if (org-roam-node-p node)
-            (funcall preview action
-                     (and cand
-                          (eq action 'preview)
-                          (set-window-start
-                           (selected-window)
-                           (org-roam-node-point node))
-                          (funcall open (org-roam-node-file node)))))))))
+        (funcall preview action buf)
+        ;; Scroll the previewed buffer to the node's position. This must
+        ;; happen after the preview displays the buffer; the selected
+        ;; window is the minibuffer during completion.
+        (when buf
+          (let ((win (get-buffer-window buf)))
+            (when win
+              (set-window-start win (org-roam-node-point node))
+              (set-window-point win (org-roam-node-point node)))))))))
 
 
 (defun consult-notes-org-roam--action (cand)
@@ -256,65 +274,74 @@ Uses `consult-notes-org-roam-open-function' to open the node."
        :props '(:finalize find-file)))))
 
 ;;;; Org-Roam & Consult--Multi
-;; Define sources for consult--multi
+;; Candidate construction shared by the nodes and refs sources.
+;; Strategy: Use org-roam's native formatting (respects user's
+;; org-roam-node-display-template and custom node accessors),
+;; but enhance with consult-notes safety features:
+;; - Handle empty formatted strings with filename/ID fallbacks
+;; - Add ID disambiguation for duplicate titles
+;; - Support dailies exclusion
+
+(defun consult-notes-org-roam--display-string (formatted node)
+  "Return FORMATTED, or a fallback derived from NODE when it is blank."
+  (if (or (not formatted)
+          (string-match-p "\\`[[:space:]]*\\'" formatted))
+      (let ((fallback (file-name-sans-extension
+                       (file-name-nondirectory (org-roam-node-file node)))))
+        (if (string-empty-p fallback)
+            ;; Ultimate fallback: use node ID if filename is also empty
+            (format "[%s]" (substring (org-roam-node-id node) 0 8))
+          fallback))
+    formatted))
+
+(defun consult-notes-org-roam--make-candidates (completions)
+  "Return display candidates for org-roam COMPLETIONS.
+
+COMPLETIONS is an alist of (DISPLAY . NODE) pairs as returned by
+`org-roam-node-read--completions' or `org-roam-ref-read--completions'.
+Respects `consult-notes-org-roam-exclude-dailies' and disambiguates
+duplicate titles with a truncated node ID."
+  (let ((filtered
+         (if (and consult-notes-org-roam-exclude-dailies
+                  (bound-and-true-p org-roam-dailies-directory))
+             ;; `org-roam-dailies-directory' is relative to `org-roam-directory'
+             (let ((dailies-dir (expand-file-name org-roam-dailies-directory
+                                                  org-roam-directory)))
+               (seq-remove
+                (lambda (completion)
+                  (string-prefix-p dailies-dir
+                                   (org-roam-node-file (cdr completion))))
+                completions))
+           completions))
+        (title-counts (make-hash-table :test 'equal)))
+    ;; First pass: count titles for duplicate detection
+    (dolist (completion filtered)
+      (let ((title (org-roam-node-title (cdr completion))))
+        (puthash title (1+ (gethash title title-counts 0)) title-counts)))
+    ;; Second pass: create candidates with disambiguation
+    (mapcar (lambda (completion)
+              (let* ((node (cdr completion))
+                     (title (org-roam-node-title node))
+                     (display (consult-notes-org-roam--display-string
+                               (car completion) node))
+                     (candidate
+                      (if (> (gethash title title-counts) 1)
+                          ;; Duplicate - append first 8 chars of ID
+                          (format "%s <%s>" display
+                                  (substring (org-roam-node-id node) 0 8))
+                        display)))
+                (propertize candidate 'node node)))
+            filtered)))
+
 (defvar consult-notes-org-roam--nodes
   `(:name ,(propertize consult-notes-org-roam-node-name 'face 'consult-notes-sep)
     :narrow ,consult-notes-org-roam-node-narrow-key
-    :category 'org-roam-node
+    :category org-roam-node
     ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
     :annotate ,(lambda (cand) (funcall consult-notes-org-roam-annotate-function cand))
     :items ,(lambda ()
-              ;; Strategy: Use org-roam's native formatting (respects user's
-              ;; org-roam-node-display-template and custom node accessors),
-              ;; but enhance with consult-notes safety features:
-              ;; - Handle empty formatted strings with filename/ID fallbacks
-              ;; - Add ID disambiguation for duplicate titles
-              ;; - Support dailies exclusion
-              (let* ((completions (org-roam-node-read--completions))
-                     (filtered-completions
-                      (if (and consult-notes-org-roam-exclude-dailies
-                               (bound-and-true-p org-roam-dailies-directory))
-                          (seq-filter
-                           (lambda (completion)
-                             (not (string-prefix-p
-                                   (expand-file-name org-roam-dailies-directory)
-                                   (org-roam-node-file (cdr completion)))))
-                           completions)
-                        completions))
-                     ;; Helper to handle empty formatted strings with fallbacks
-                     (get-display-candidate
-                      (lambda (formatted-string node)
-                        (if (or (not formatted-string)
-                                (string-empty-p formatted-string)
-                                (string-match-p "\\`[[:space:]]*\\'" formatted-string))
-                            (let ((fallback (file-name-sans-extension
-                                             (file-name-nondirectory (org-roam-node-file node)))))
-                              (if (string-empty-p fallback)
-                                  ;; Ultimate fallback: use node ID if filename is also empty
-                                  (format "[%s]" (substring (org-roam-node-id node) 0 8))
-                                fallback))
-                          formatted-string)))
-                     ;; Count occurrences of each title to detect duplicates
-                     (title-counts (make-hash-table :test 'equal)))
-                ;; First pass: count titles for duplicate detection
-                (dolist (completion filtered-completions)
-                  (let ((title (org-roam-node-title (cdr completion))))
-                    (puthash title (1+ (gethash title title-counts 0)) title-counts)))
-                ;; Second pass: create enhanced candidates with disambiguation
-                (mapcar (lambda (completion)
-                          (let* ((formatted (car completion))
-                                 (node (cdr completion))
-                                 (title (org-roam-node-title node))
-                                 (display-string (funcall get-display-candidate formatted node))
-                                 (candidate
-                                  (if (> (gethash title title-counts) 1)
-                                      ;; Duplicate - append first 8 chars of ID
-                                      (format "%s <%s>" display-string
-                                              (substring (org-roam-node-id node) 0 8))
-                                    ;; Unique - use formatted string as-is
-                                    display-string)))
-                            (propertize candidate 'node node)))
-                        filtered-completions)))
+              (consult-notes-org-roam--make-candidates
+               (org-roam-node-read--completions)))
     :state ,#'consult-notes-org-roam-node-preview
     :action ,#'consult-notes-org-roam--action
     :new ,#'consult-notes-org-roam--new-node)
@@ -324,61 +351,12 @@ Uses `consult-notes-org-roam-open-function' to open the node."
   `(:name ,(propertize consult-notes-org-roam-ref-name 'face 'consult-notes-sep)
     :narrow ,consult-notes-org-roam-ref-narrow-key
     :require-match t
-    :category 'org-roam-ref
+    :category org-roam-ref
     ;; Use lambda wrapper to look up function at runtime, not at byte-compile time
     :annotate ,(lambda (cand) (funcall consult-notes-org-roam-annotate-function cand))
     :items ,(lambda ()
-              ;; Strategy: Use org-roam's native formatting (respects user's
-              ;; org-roam-node-display-template and custom node accessors),
-              ;; but enhance with consult-notes safety features:
-              ;; - Handle empty formatted strings with filename/ID fallbacks
-              ;; - Add ID disambiguation for duplicate titles
-              ;; - Support dailies exclusion
-              (let* ((completions (org-roam-ref-read--completions))
-                     (filtered-completions
-                      (if (and consult-notes-org-roam-exclude-dailies
-                               (bound-and-true-p org-roam-dailies-directory))
-                          (seq-filter
-                           (lambda (completion)
-                             (not (string-prefix-p
-                                   (expand-file-name org-roam-dailies-directory)
-                                   (org-roam-node-file (cdr completion)))))
-                           completions)
-                        completions))
-                     ;; Helper to handle empty formatted strings with fallbacks
-                     (get-display-candidate
-                      (lambda (formatted-string node)
-                        (if (or (not formatted-string)
-                                (string-empty-p formatted-string)
-                                (string-match-p "\\`[[:space:]]*\\'" formatted-string))
-                            (let ((fallback (file-name-sans-extension
-                                             (file-name-nondirectory (org-roam-node-file node)))))
-                              (if (string-empty-p fallback)
-                                  ;; Ultimate fallback: use node ID if filename is also empty
-                                  (format "[%s]" (substring (org-roam-node-id node) 0 8))
-                                fallback))
-                          formatted-string)))
-                     ;; Count occurrences of each title to detect duplicates
-                     (title-counts (make-hash-table :test 'equal)))
-                ;; First pass: count titles for duplicate detection
-                (dolist (completion filtered-completions)
-                  (let ((title (org-roam-node-title (cdr completion))))
-                    (puthash title (1+ (gethash title title-counts 0)) title-counts)))
-                ;; Second pass: create enhanced candidates with disambiguation
-                (mapcar (lambda (completion)
-                          (let* ((formatted (car completion))
-                                 (node (cdr completion))
-                                 (title (org-roam-node-title node))
-                                 (display-string (funcall get-display-candidate formatted node))
-                                 (candidate
-                                  (if (> (gethash title title-counts) 1)
-                                      ;; Duplicate - append first 8 chars of ID
-                                      (format "%s <%s>" display-string
-                                              (substring (org-roam-node-id node) 0 8))
-                                    ;; Unique - use formatted string as-is
-                                    display-string)))
-                            (propertize candidate 'node node)))
-                        filtered-completions)))
+              (consult-notes-org-roam--make-candidates
+               (org-roam-ref-read--completions)))
     :state ,#'consult-notes-org-roam-node-preview
     :action ,#'consult-notes-org-roam--action)
   "Setup for `org-roam-refs' and `consult--multi'.")
@@ -406,11 +384,15 @@ note. Optionally takes a selected NODE and filepaths CHOICES."
   (let* ((choices
           (or choices
               (when arg
-                (-map #'org-roam-backlink-target-node (org-roam-backlinks-get (org-roam-node-from-id (or (ignore-errors (org-roam-node-id node))
-                                                                                                         (org-id-get-create))))))))
+                (mapcar #'org-roam-backlink-target-node
+                        (org-roam-backlinks-get
+                         (org-roam-node-from-id
+                          (or (ignore-errors (org-roam-node-id node))
+                              (org-id-get-create))))))))
          (all-notes (org-roam-node-read--completions))
          (completions
-          (or (--filter (-contains-p choices (cdr it)) all-notes) all-notes))
+          (or (seq-filter (lambda (it) (member (cdr it) choices)) all-notes)
+              all-notes))
          (next-node
           ;; taken from org-roam-node-read
           (let* ((nodes completions)
@@ -428,7 +410,11 @@ note. Optionally takes a selected NODE and filepaths CHOICES."
                 (org-roam-node-create :title node)))))
     (if (equal node next-node)
         (org-roam-node-visit node)
-      (consult-notes-org-roam-find-node-relation nil next-node (cons next-node (-map #'org-roam-backlink-source-node (org-roam-backlinks-get next-node)))))))
+      (consult-notes-org-roam-find-node-relation
+       nil next-node
+       (cons next-node
+             (mapcar #'org-roam-backlink-source-node
+                     (org-roam-backlinks-get next-node)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

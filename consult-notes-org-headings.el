@@ -35,47 +35,61 @@
 ;;;; Variables
 (defvar consult-notes-org-headings--history nil)
 
-(defcustom consult-notes-org-headings-files org-agenda-files
-  "Source for `consult-notes-org-headings'.
+(defcustom consult-notes-org-headings-files nil
+  "Files used by the `consult-notes' org-headings source.
 
-Default value is the value of variable `org-agenda-files'."
+The value may be:
+- nil (the default), meaning use the current value of
+  `org-agenda-files', resolved at call time;
+- a list of files and/or directories;
+- a single file name, naming a file that contains the list of
+  files, as with the variable `org-agenda-files';
+- a function of no arguments returning a list of files and/or
+  directories."
   :group 'consult-notes
-  :type '(repeat file))
+  :type '(choice (const :tag "Use org-agenda-files" nil)
+                 (repeat :tag "List of files and directories" file)
+                 (file :tag "File containing a list of files")
+                 (function :tag "Function returning a file list")))
 
-(defcustom consult-org-headings-narrow-key ?h
+(define-obsolete-variable-alias 'consult-org-headings-narrow-key
+  'consult-notes-org-headings-narrow-key "0.9")
+
+(defcustom consult-notes-org-headings-narrow-key ?h
   "Key for narrowing using `consult-notes' function."
   :group 'consult-notes
   :type 'key)
 
 ;;;; Functions
-;; See https://emacs.stackexchange.com/a/28689/11934
-(defun consult-notes--string-matches (search strings)
-  "Match (partial) string SEARCH to member of list STRINGS."
-  (while (and strings (not (string-match search (car strings))))
-    (setq strings (cdr strings)))
-  strings)
-
-;; This is adapted from `(org-agenda-files)'.
+;; The expansion logic is adapted from the function `org-agenda-files'.
 (defun consult-notes-org-headings-files ()
-  "Get the list of org-headings files."
-  (let ((files
-	     (cond
-	      ((stringp consult-notes-org-headings-files) (org-read-agenda-file-list))
-	      ((listp consult-notes-org-headings-files) consult-notes-org-headings-files)
-	      (t (error "Invalid value of `consult-notes-org-headings-files'")))))
-    (setq files (apply 'append
-		               (mapcar (lambda (f)
-				                 (if (file-directory-p f)
-				                     (directory-files
-				                      f t org-agenda-file-regexp)
-				                   (list (expand-file-name f org-directory))))
-			                   files)))
-    (when org-agenda-skip-unavailable-files
-      (setq files (delq nil
-			            (mapcar (lambda (file)
-				                  (and (file-readable-p file) file))
-				                files))))
-    files))
+  "Return the resolved list of org-headings files.
+
+See the variable `consult-notes-org-headings-files' for the
+possible values. When it is nil, delegate to the function
+`org-agenda-files', which already expands directories and skips
+unavailable files."
+  (if (null consult-notes-org-headings-files)
+      (org-agenda-files)
+    (let ((files
+	       (cond
+	        ((functionp consult-notes-org-headings-files)
+	         (funcall consult-notes-org-headings-files))
+	        ((stringp consult-notes-org-headings-files)
+	         (org-read-agenda-file-list))
+	        ((listp consult-notes-org-headings-files)
+	         consult-notes-org-headings-files)
+	        (t (error "Invalid value of `consult-notes-org-headings-files'")))))
+      (setq files (apply #'append
+		                 (mapcar (lambda (f)
+				                   (if (file-directory-p f)
+				                       (directory-files
+				                        f t org-agenda-file-regexp)
+				                     (list (expand-file-name f org-directory))))
+			                     files)))
+      (when org-agenda-skip-unavailable-files
+        (setq files (seq-filter #'file-readable-p files)))
+      files)))
 
 (defun consult-notes--org-headings (match scope &rest skip)
   "Return a list of Org heading candidates.
@@ -106,12 +120,9 @@ MATCH, SCOPE and SKIP are as in `org-map-entries'."
          cand))
      match scope skip)))
 
-(defun consult-notes-org-headings--mrkr (cand &optional find-file)
-  "Return the marker for CAND.
-FIND-FILE is the file open function, defaulting to `find-file'."
-  (when cand
-    (let* ((mrkr (and cand (get-text-property 0 'org-marker cand))))
-      mrkr)))
+(defun consult-notes-org-headings--mrkr (cand)
+  "Return the org marker stored in CAND."
+  (and cand (get-text-property 0 'org-marker cand)))
 
 (defun consult-notes-org-headings--state ()
   "Org headings state function."
@@ -120,29 +131,26 @@ FIND-FILE is the file open function, defaulting to `find-file'."
     (lambda (action cand)
       (unless cand
         (funcall open))
-      (funcall jump action (consult-notes-org-headings--mrkr
-                            cand
-                            (and (not (eq action 'return)) open))))))
+      (funcall jump action (consult-notes-org-headings--mrkr cand)))))
 
 ;;;; Annotations
 (defun consult-notes-org-headings-annotations (cand)
-  "Annotate file CAND with its file attributes, size, and modification time."
-  (let* ((name (buffer-name
-                (marker-buffer
-                 (get-text-property 0 'org-marker cand))))
-         (path (car
-                (consult-notes--string-matches name consult-notes-org-headings-files)))
-         (attrs (file-attributes path))
-         (ftime (consult-notes--time (file-attribute-modification-time attrs)))
-         (fsize (file-size-human-readable (or (file-attribute-size attrs) 0 ))))
-    (put-text-property 0 (length fsize) 'face 'consult-notes-size fsize)
-    (put-text-property 0 (length ftime) 'face 'consult-notes-time ftime)
-    (format "%8s  %8s" fsize ftime)))
+  "Annotate heading CAND with its file's size and modification time."
+  (let* ((mrkr (get-text-property 0 'org-marker cand))
+         (buf (and mrkr (marker-buffer mrkr)))
+         (path (and buf (buffer-file-name buf)))
+         (attrs (and path (file-attributes path))))
+    (when attrs
+      (let ((ftime (consult-notes--time (file-attribute-modification-time attrs)))
+            (fsize (file-size-human-readable (or (file-attribute-size attrs) 0))))
+        (put-text-property 0 (length fsize) 'face 'consult-notes-size fsize)
+        (put-text-property 0 (length ftime) 'face 'consult-notes-time ftime)
+        (format "%8s  %8s" fsize ftime)))))
 
 ;;;; Source
 (defconst consult-notes-org-headings--source
   (list :name (propertize "Org Headings" 'face 'consult-notes-sep)
-        :narrow consult-org-headings-narrow-key
+        :narrow consult-notes-org-headings-narrow-key
         :category 'org-heading
         :require-match t
         :items (lambda ()
