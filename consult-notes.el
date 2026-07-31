@@ -2,7 +2,7 @@
 
 ;; Author: Colin McLear <mclear@fastmail.com>
 ;; Maintainer: Colin McLear
-;; Version: 0.8
+;; Version: 0.9
 ;; Package-Requires: ((emacs "28.1") (consult "1.0"))
 ;; Keywords: convenience
 ;; Homepage: https://codeberg.org/mclear-tools/consult-notes
