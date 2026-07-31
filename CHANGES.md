@@ -35,6 +35,9 @@
   for backlink counts and stat the file for size when
   `consult-notes-org-roam-blinks` / `consult-notes-org-roam-show-file-size`
   are enabled.
+- **Loading without org-roam**: requiring `consult-notes-org-roam` without
+  org-roam installed signaled "Unknown specializer org-roam-node"; the
+  display methods are now defined once org-roam loads.
 
 ### Denote
 
@@ -64,6 +67,8 @@
   `consult-notes--string-matches` (obsoleted by the annotation fix).
 - **Byte-compilation**: all files compile without warnings (docstring widths,
   free variables, quoting, faces group).
+- **Test suite**: new ERT suite and warnings-as-errors compile check, run
+  with `make check` from the repository root.
 
 ## 0.8
 

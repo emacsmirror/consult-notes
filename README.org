@@ -262,6 +262,13 @@ If you use [[https://github.com/emacs-citar/citar][citar]] you can integrate sup
       (message "No notes cite this reference."))))
 #+end_src
 
+* Development
+
+Run =make check= from the repository root to byte-compile all files with
+warnings treated as errors and run the ERT test suite. The first run installs
+=consult= into a local =.deps= directory; denote and org-roam are stubbed by
+the tests, so they need not be installed. =make clean= removes =.deps=.
+
 * Related Packages
 - [[https://github.com/jgru/consult-org-roam][Consult-org-roam]] offers consult-completion/narrowing functionality related strictly to org-roam. 
 - [[https://github.com/jrblevin/deft][Deft]] provides dedicated buffer notes search/filtering

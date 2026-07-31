@@ -43,6 +43,19 @@
 (defvar denote-directory)
 (defvar denote-prompts)
 
+(declare-function denote "denote")
+(declare-function denote-directory-files "denote")
+(declare-function denote-retrieve-filename-identifier "denote")
+(declare-function denote-retrieve-title-value "denote")
+(declare-function denote-retrieve-filename-title "denote")
+(declare-function denote-filetype-heuristics "denote")
+(declare-function denote-extract-keywords-from-path "denote")
+(declare-function denote-keywords-prompt "denote")
+(declare-function denote-file-type-prompt "denote")
+(declare-function denote-subdirectory-prompt "denote")
+(declare-function denote-date-prompt "denote")
+(declare-function denote-template-prompt "denote")
+
 (defcustom consult-notes-denote-display-id t
   "Whether ID is displayed in annotations for `consult-notes-denote'."
   :group 'consult-notes
